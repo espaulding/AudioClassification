@@ -12,6 +12,7 @@ using Accord.Audio.Windows;
 
 namespace AudioClassification {
     public class Sound {
+        public static string[] featureNames = new string[] {"Zerocrossing","Low Band Energy","High Band Energy","Brightness"};
         public string filename;
         public string fullname;
         public bool isMusic;
@@ -55,14 +56,18 @@ namespace AudioClassification {
         #region feature extraction
 
         //analyze the sound file that is being referenced by the sound object and collect structural information about the sound file
+        //the files were recorded at wildly inconsistent volume
+        //TODO: is there some way to normalize the volume?
         public void ExtractFeatures() {
+            features.Clear(); //dump any old data
+
             //decode the wave file into a signal
             WaveDecoder decoder = new WaveDecoder();
             decoder.Open(fullname);
             Signal decodedSignal = decoder.Decode();
-            decodedSignal = CopySignal(decodedSignal, (int)Math.Pow(2, 14)); //must cut signal to a power of 2
+            //decodedSignal = CopySignal(decodedSignal, (int)Math.Pow(2, 14)); //must cut signal to a power of 2
 
-            //Get the time domain of the signal
+            //***************Get the time domain of the signal********************
             float[] time = null, amplitude = null;
             GetTimeDomain(ref decodedSignal, ref time, ref amplitude);
             float[] decibel = AmplitudeToDecibel(amplitude);
@@ -73,40 +78,40 @@ namespace AudioClassification {
             //confirmed that either it doesn't or I'm using the wrong amplitudes
             double energyOriginal = decodedSignal.GetEnergy(); //indicates the loudness of the signal
 
-            //get the frequency domain of the signal
-            //TODO: make sure this has vectors with the same length as time
-            double[] frequency = null, magnitude = null, phase = null, power1 = null, power2 = null;
-            double[] energyf = GetFrequencyDomain(decodedSignal, ref frequency, ref magnitude, ref phase, ref power1, ref power2);
-            double power1max = power1.Max();
-            double power1min = power1.Min();
-
             double energyAmp = CalculateAverageEnergy(amplitude);
             float maxAmp = amplitude.Max();
             float minAmp = amplitude.Min();
 
-            double brightness = CalculateSpectralCentroid(frequency, magnitude);
-
             double zerocrossings = CalculateZeroCrossings(amplitude);
 
             //speech is typically below 7 kHz
-            double bandwidth = 7000; //CalculateBandwidth(frequency);
-            double RC = 1 / (2 * Math.PI * bandwidth);
-            //double dt = 1d / decodedSignal.SampleRate;
-            double dt = (double)decodedSignal.Duration / decodedSignal.Samples; //dt = duration(ms) / number of samples.
+            double cutoff = 7000; //CalculateBandwidth(frequency); //always returns 8000 which is samplerate/2
+            double RC = 1d / (2d * Math.PI * cutoff);
+            double RC8 = 240000 * 82 * Math.Pow(10, -12); //matches up with cutoff of 8087 Hz
+            double dt = 1d / decodedSignal.SampleRate;
+            //double dt = (double)decodedSignal.Duration / 1000 / decodedSignal.Samples; //dt = duration(ms) / number of samples.
             float alpha = (float)(dt / (dt + RC));
-            //float alpha = .065f;
 
             LowPassFilter low = new LowPassFilter(alpha);
             Signal lowSignal = low.Apply(decodedSignal);
-            float[] l = lowSignal.ToFloat();
             //double energyLow = lowSignal.GetEnergy();
-            double energyLow = CalculateAverageEnergy(l);
+            //float[] l = lowSignal.ToFloat();
+            double energyLow = CalculateAverageEnergy(lowSignal.ToFloat());
 
             HighPassFilter high = new HighPassFilter(alpha);
             Signal highSignal = high.Apply(decodedSignal);
-            float[] h = highSignal.ToFloat();
             //double energyHigh = highSignal.GetEnergy();
-            double energyHigh = CalculateAverageEnergy(h);
+            //float[] h = highSignal.ToFloat();
+            double energyHigh = CalculateAverageEnergy(highSignal.ToFloat());
+
+            //***************get the frequency domain of the signal*****************
+            //TODO: make sure this has vectors with the same length as time
+            double[] frequency = null, magnitude = null, phase = null, power1 = null, power2 = null;
+            double[] energyf = GetFrequencyDomain(decodedSignal, ref frequency, ref magnitude, ref phase, ref power1, ref power2);
+
+            double power1max = power1.Max();
+            double power1min = power1.Min();
+            double brightness = CalculateSpectralCentroid(frequency, magnitude);
 
             features.Add(zerocrossings); //expect speech to have more zero crossings
             features.Add(energyLow);     //expect speech to have more energy below 7 kHz
@@ -139,20 +144,22 @@ namespace AudioClassification {
             //Create Hamming window allowing the window to be processed in chunks that are sized by powers of 2    
             //RaisedCosineWindow window = RaisedCosineWindow.Hamming((int)Math.Pow(2,9));
 
-            //s = window.Apply(s, 0);
-            //s.ForwardFourierTransform();
+            //signal = window.Apply(signal, 0);
+            //signal.ForwardFourierTransform();
             //AForge.Math.Complex[] ch = s.GetChannel(0); //get signal FFT elements
 
             //Note that this will result in overlapped windows.
             //Signal[] windows = signal.Split(window, 256); //Split requires signal to already be a ComplexSignal which kinda defeats the point here
-            //ComplexSignal[] complex = windows.Apply(ComplexSignal.FromSignal);
+            //ComplexSignal[] complex = windows.Apply(ComplexSignal.FromSignal,0);
             //complex.ForwardFourierTransform();
 
             //TODO: delete OLD CODE when Hamming window is working
+            RaisedCosineWindow window = RaisedCosineWindow.Hamming((int)Math.Pow(2, 14));
             Signal signalSlice = CopySignal(signal, (int)Math.Pow(2, 14)); //must cut signal to a power of 2
             ComplexSignal fftSignal = signalSlice.ToComplex();             //convert to complex signal for FFT
+            fftSignal = window.Apply(fftSignal, 0);
 
-            fftSignal.ForwardFourierTransform();                           
+            fftSignal.ForwardFourierTransform();
             AForge.Math.Complex[] channel = fftSignal.GetChannel(0); //get signal FFT elements
  
             frequency = Accord.Audio.Tools.GetFrequencyVector(fftSignal.Length, fftSignal.SampleRate);
@@ -180,15 +187,16 @@ namespace AudioClassification {
             //short[] amp = new short[amplitude.Length];
             //SampleConverter.Convert(amplitude, amp);
 
-            float[] db = AmplitudeToDecibel(amplitude);
+            int count = amplitude.Length;
+            amplitude = AmplitudeToDecibel(amplitude.Where(a => a>0).ToArray());
 
             float sum = 0;
-            for (int c = 0; c < db.Length; c++) {
-                if (!float.IsNaN(db[c]) && !float.IsNegativeInfinity(db[c])) {
-                    sum += db[c] * db[c];
+            for (int c = 0; c < amplitude.Length; c++) {
+                if (!float.IsNaN(amplitude[c]) && !float.IsNegativeInfinity(amplitude[c])) {
+                    sum += (float)Math.Pow((double)amplitude[c]+1,2);
                 }
             }
-            return sum / db.Length;
+            return sum / count;
         }
 
         //also called brightness, derived from energy distribution
@@ -209,7 +217,7 @@ namespace AudioClassification {
         //count the number of times that the zmplitude crosses the x-axis. 
         //i.e. switches from positive to negative or negative to positive
         private double CalculateZeroCrossings(float[] amplitude) {
-            int[] signs = amplitude.Select(e => SignOf(e)).ToArray();
+            int[] signs = amplitude.Select(e => Math.Sign(e)).Where(e => e!=0).ToArray();
             double numerator = 0;
 
             for (int c = 1; c < signs.Length; c++) {
@@ -279,17 +287,6 @@ namespace AudioClassification {
             }
 
             return output;
-        }
-
-        //get the sign of a number
-        //positive -> 1, negative -> -1, 0 -> 0
-        //TODO: consider rounding extremely small numbers to 0 first 
-        //      in order to avoid floating point errors causing random signs
-        private int SignOf(float number) {
-            int sign = 0;
-            if (number > 0) { sign = 1; }
-            if (number < 0) { sign = -1; }
-            return sign;
         }
 
         #endregion //helper functions
