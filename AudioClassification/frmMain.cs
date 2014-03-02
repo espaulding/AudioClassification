@@ -1,23 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Media;
 using System.Windows.Forms;
-using Accord.Audio;
-using Accord.Audio.Formats;
-using Accord.MachineLearning;
 using Accord.MachineLearning.DecisionTrees;
 using Accord.MachineLearning.DecisionTrees.Learning;
-using Accord.MachineLearning.VectorMachines;
-using Accord.MachineLearning.VectorMachines.Learning;
 using Accord.Math;
 using Accord.Statistics.Analysis;
-using Accord.Statistics.Formats;
-using Accord.Statistics.Kernels;
-using ZedGraph;
 
 //NuGet: install into visual studio
 //tools -> Library Package Manager

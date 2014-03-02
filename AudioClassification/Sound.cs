@@ -4,10 +4,7 @@ using System.Linq;
 using Accord.Audio;
 using Accord.Audio.Formats;
 using Accord.Audio.Filters;
-using Accord.MachineLearning.VectorMachines;
-using Accord.MachineLearning.VectorMachines.Learning;
 using Accord.Math;
-using Accord.Statistics.Kernels;
 using Accord.Audio.Windows;
 
 namespace AudioClassification {
